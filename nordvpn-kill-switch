@@ -1,0 +1,52 @@
+#!/bin/bash
+set -e
+
+CONFIG="$1"
+
+if [[ -z $CONFIG ]]
+then
+    echo "Usage: sudo nordvpn-kill-switch some_vpn_config.ovpn"
+    exit 1
+fi
+
+if [[ $EUID -ne 0 ]]
+then
+    echo "Please run as root"
+    exit 2
+fi
+
+IP=`grep "remote " "$CONFIG" | awk '{print $2}'` # not sure if there is a better way...
+
+if [[ -z $IP ]]
+then
+    echo "Wasn't able to parse VPN IP from the config"
+    exit 3
+fi
+
+echo "Connecting to $IP"
+
+# https://support.nordvpn.com/hc/en-us/articles/208083995-DNS-servers
+# NordVPN DNS server addresses are: 162.242.211.137 and 78.46.223.24
+DNS1="162.242.211.137"
+DNS2="78.46.223.24"
+
+echo "nameserver $DNS1" >  /etc/resolv.conf
+echo "nameserver $DNS2" >> /etc/resolv.conf
+
+ufw --force reset  # reset without prompt to drop previous settings
+# TODO is there a way to reset to deny directly?
+ufw default deny outgoing
+ufw default deny incoming
+ufw allow out on tun0 from any to any
+ufw allow in on tun0 from any to any
+
+ufw allow out from any to "$IP"
+# TODO are these DNS entries unnecessary? Covered by former rules
+# ufw allow out on tun0 from any to "$DNS1"
+# ufw allow out on tun0 from any to "$DNS2"
+
+ufw enable
+ufw status
+
+openvpn "$CONFIG"
+
